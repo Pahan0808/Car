@@ -14,65 +14,93 @@ namespace DriveMad
             Fell
         }
 
+        [Header("Data")]
+        [SerializeField] GameSettings settings;
+
+        [Header("Scene wiring")]
         [SerializeField] DriveMadCarController car;
         [SerializeField] Text statusText;
-        [SerializeField] float upsideDownFailTime = 0.55f;
-        [SerializeField] float fallY = -12f;
-        [SerializeField] Vector3 gravity = new Vector3(0f, -12.5f, 0f);
 
+        GameSettings _runtimeSettings;
         Outcome _outcome = Outcome.Playing;
         float _upsideDownTimer;
 
         public Outcome Current => _outcome;
+        public bool IsPlaying => _outcome == Outcome.Playing;
 
         public void SetCar(DriveMadCarController value) => car = value;
         public void SetStatusText(Text value) => statusText = value;
+        public void SetSettings(GameSettings value) => settings = value;
+
+        GameSettings Settings
+        {
+            get
+            {
+                if (settings != null)
+                {
+                    return settings;
+                }
+
+                if (_runtimeSettings == null)
+                {
+                    Debug.LogError($"DriveMad: {name} has no GameSettings assigned, falling back to defaults.", this);
+                    _runtimeSettings = ScriptableObject.CreateInstance<GameSettings>();
+                }
+
+                return _runtimeSettings;
+            }
+        }
 
         void Awake()
         {
-            Physics.gravity = gravity;
+            GameSettings s = Settings;
+            Physics.gravity = s.gravity;
             // The body must collide with the ground at all times, not only after a crash.
             // Wheel-vs-body contacts are disabled per collider pair in the car controller instead.
-            Physics.IgnoreLayerCollision(8, 9, false);
+            Physics.IgnoreLayerCollision(s.groundLayer, s.vehicleLayer, false);
             ShowStatus(string.Empty);
         }
 
         void Update()
         {
-            if (_outcome != Outcome.Playing || car == null)
+            if (!IsPlaying || car == null)
             {
                 return;
             }
 
             Vector3 carPos = car.Body != null ? car.Body.position : car.Chassis.position;
-            if (carPos.y < fallY)
+            if (carPos.y < Settings.fallY)
             {
                 NotifyFell();
                 return;
             }
 
-            if (car.IsUpsideDown)
-            {
-                _upsideDownTimer += Time.deltaTime;
-                if (_upsideDownTimer >= upsideDownFailTime)
-                {
-                    Fail(Outcome.Crashed, "CRASH — R / Space");
-                }
-            }
-            else
+            UpdateRollOver();
+        }
+
+        void UpdateRollOver()
+        {
+            if (!car.IsUpsideDown)
             {
                 _upsideDownTimer = 0f;
+                return;
+            }
+
+            _upsideDownTimer += Time.deltaTime;
+            if (_upsideDownTimer >= Settings.upsideDownFailTime)
+            {
+                Fail(Outcome.Crashed, Settings.crashMessage);
             }
         }
 
         public void NotifyFell()
         {
-            Fail(Outcome.Fell, "FELL — R / Space");
+            Fail(Outcome.Fell, Settings.fellMessage);
         }
 
         public void Win()
         {
-            if (_outcome != Outcome.Playing)
+            if (!IsPlaying)
             {
                 return;
             }
@@ -80,7 +108,7 @@ namespace DriveMad
             _outcome = Outcome.Won;
             car.SetThrottle(0f);
             car.FreezePhysics(true);
-            ShowStatus("FINISH");
+            ShowStatus(Settings.winMessage);
         }
 
         public void Restart()
@@ -91,7 +119,7 @@ namespace DriveMad
 
         void Fail(Outcome outcome, string message)
         {
-            if (_outcome != Outcome.Playing)
+            if (!IsPlaying)
             {
                 return;
             }

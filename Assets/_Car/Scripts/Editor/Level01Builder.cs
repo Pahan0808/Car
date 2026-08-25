@@ -27,15 +27,18 @@ namespace DriveMad.EditorTools
             Material hillMat = EnsureMaterial("HillDirt", new Color(0.76f, 0.58f, 0.34f));
             Material markerMat = EnsureMaterial("Marker", new Color(0.92f, 0.92f, 0.92f));
             PhysicsMaterial grip = EnsurePhysicsMaterial();
+            CarSettings carSettings = EnsureCarSettings();
+            GameSettings gameSettings = EnsureGameSettings();
 
             ClearRoots();
 
             SmoothHill hill = CreateHill(hillMat, grip);
             GameObject gameRoot = new GameObject("GameSession");
             LevelSession session = gameRoot.AddComponent<LevelSession>();
+            session.SetSettings(gameSettings);
             DriveInput input = gameRoot.AddComponent<DriveInput>();
 
-            DriveMadCarController car = CreateCar();
+            DriveMadCarController car = CreateCar(carSettings);
             CreateMarkers(hill, markerMat);
             CreateFinish(hill, session);
             CreateKillZone(session);
@@ -48,6 +51,7 @@ namespace DriveMad.EditorTools
             session.SetCar(car);
 
             SerializedObject sessionSo = new SerializedObject(session);
+            sessionSo.FindProperty("settings").objectReferenceValue = gameSettings;
             sessionSo.FindProperty("car").objectReferenceValue = car;
             sessionSo.ApplyModifiedProperties();
 
@@ -116,6 +120,32 @@ namespace DriveMad.EditorTools
             return mat;
         }
 
+        static CarSettings EnsureCarSettings()
+        {
+            const string path = "Assets/_Car/Data/ScriptableObjects/CarSettings.asset";
+            CarSettings settings = AssetDatabase.LoadAssetAtPath<CarSettings>(path);
+            if (settings == null)
+            {
+                settings = ScriptableObject.CreateInstance<CarSettings>();
+                AssetDatabase.CreateAsset(settings, path);
+            }
+
+            return settings;
+        }
+
+        static GameSettings EnsureGameSettings()
+        {
+            const string path = "Assets/_Car/Data/ScriptableObjects/GameSettings.asset";
+            GameSettings settings = AssetDatabase.LoadAssetAtPath<GameSettings>(path);
+            if (settings == null)
+            {
+                settings = ScriptableObject.CreateInstance<GameSettings>();
+                AssetDatabase.CreateAsset(settings, path);
+            }
+
+            return settings;
+        }
+
         static void ClearRoots()
         {
             GameObject[] roots = SceneManager.GetActiveScene().GetRootGameObjects();
@@ -141,7 +171,7 @@ namespace DriveMad.EditorTools
             return hill;
         }
 
-        static DriveMadCarController CreateCar()
+        static DriveMadCarController CreateCar(CarSettings carSettings)
         {
             GameObject root = new GameObject("PlayerCar");
             root.layer = VehicleLayer;
@@ -149,55 +179,94 @@ namespace DriveMad.EditorTools
 
             DriveMadCarController car = root.AddComponent<DriveMadCarController>();
 
-            GameObject visual = new GameObject("Visual");
-            visual.transform.SetParent(root.transform, false);
-            visual.layer = VehicleLayer;
-            visual.AddComponent<Rigidbody>();
-            BoxCollider box = visual.AddComponent<BoxCollider>();
-            box.center = new Vector3(0f, 0.48f, -0.12f);
-            box.size = new Vector3(0.7f, 0.5f, 1.85f);
+            GameObject chassis = new GameObject("ColliiderBody");
+            chassis.transform.SetParent(root.transform, false);
+            chassis.transform.localPosition = new Vector3(0f, 0.66f, 0f);
+            chassis.layer = VehicleLayer;
+            chassis.AddComponent<Rigidbody>();
+            BoxCollider bodyBox = chassis.AddComponent<BoxCollider>();
+            bodyBox.center = new Vector3(0f, 0.4f, -0.09f);
+            bodyBox.size = new Vector3(0.8f, 0.6f, 2.3f);
+            PlaceModel("Assets/_Car/Import/VoxelCar/Body.fbx", chassis.transform, "Body", Vector3.zero, Vector3.one * CarScale);
 
-            GameObject bodyMesh = PlaceModel("Assets/_Car/Import/VoxelCar/Body.fbx", visual.transform, "Body", Vector3.zero, Vector3.one * CarScale);
-            GameObject susF = PlaceModel("Assets/_Car/Import/VoxelCar/Suspension.fbx", visual.transform, "Suspension_Front", new Vector3(0f, WheelRadius, FrontZ), Vector3.one * CarScale);
-            GameObject susR = PlaceModel("Assets/_Car/Import/VoxelCar/Suspension.fbx", visual.transform, "Suspension_Rear", new Vector3(0f, WheelRadius, RearZ), Vector3.one * CarScale);
+            Transform topFront = new GameObject("Top_Front").transform;
+            topFront.SetParent(chassis.transform, false);
+            topFront.localPosition = new Vector3(0f, 0.197f, 0.638f);
+            Transform topRear = new GameObject("Top_Back").transform;
+            topRear.SetParent(chassis.transform, false);
+            topRear.localPosition = new Vector3(0f, 0.197f, -0.815f);
 
-            Transform wheels = new GameObject("Wheels").transform;
-            wheels.SetParent(root.transform, false);
+            Transform suspensionParentFront = new GameObject("SuspensionParent_Front").transform;
+            suspensionParentFront.SetParent(root.transform, false);
+            Transform suspensionParentRear = new GameObject("SuspensionParent_Back").transform;
+            suspensionParentRear.SetParent(root.transform, false);
 
-            Transform fl = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheels, "Wheel_FL", new Vector3(-AxleHalf, WheelRadius, FrontZ), Vector3.one * CarScale).transform;
-            Transform fr = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheels, "Wheel_FR", new Vector3(AxleHalf, WheelRadius, FrontZ), Vector3.one * CarScale).transform;
-            Transform rl = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheels, "Wheel_RL", new Vector3(-AxleHalf, WheelRadius, RearZ), Vector3.one * CarScale).transform;
-            Transform rr = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheels, "Wheel_RR", new Vector3(AxleHalf, WheelRadius, RearZ), Vector3.one * CarScale).transform;
+            Transform bottomFront = CreateBottom(suspensionParentFront, "Bottom_Front", new Vector3(0f, 0.54f, 0.638f));
+            Transform bottomRear = CreateBottom(suspensionParentRear, "Bottom_Back", new Vector3(0f, 0.54f, -0.815f));
+            Transform suspensionVisualFront = PlaceModel("Assets/_Car/Import/VoxelCar/Suspension.fbx", bottomFront, "Visual", Vector3.zero, Vector3.one * CarScale).transform;
+            Transform suspensionVisualRear = PlaceModel("Assets/_Car/Import/VoxelCar/Suspension.fbx", bottomRear, "Visual", Vector3.zero, Vector3.one * CarScale).transform;
 
-            car.SetVisuals(fl, fr, rl, rr, susF.transform, susR.transform);
+            Transform wheelPhysicsFront = new GameObject("WheelPhysics_Front").transform;
+            wheelPhysicsFront.SetParent(root.transform, false);
+            Transform wheelPhysicsRear = new GameObject("WheelPhysics_Back").transform;
+            wheelPhysicsRear.SetParent(root.transform, false);
 
-            car.SetChassis(visual.transform);
+            Transform wheelFront = CreateWheelCollider(wheelPhysicsFront, "ColliderWheels_Front", new Vector3(0f, WheelRadius, FrontZ));
+            Transform wheelRear = CreateWheelCollider(wheelPhysicsRear, "ColliderWheels_Back", new Vector3(0f, WheelRadius, RearZ));
+            Transform fl = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheelFront, "Wheel_FL", new Vector3(-AxleHalf, 0f, 0f), Vector3.one * CarScale).transform;
+            Transform fr = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheelFront, "Wheel_FR", new Vector3(AxleHalf, 0f, 0f), Vector3.one * CarScale).transform;
+            Transform rl = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheelRear, "Wheel_RL", new Vector3(-AxleHalf, 0f, 0f), Vector3.one * CarScale).transform;
+            Transform rr = PlaceModel("Assets/_Car/Import/VoxelCar/Wheel.fbx", wheelRear, "Wheel_RR", new Vector3(AxleHalf, 0f, 0f), Vector3.one * CarScale).transform;
 
             SerializedObject so = new SerializedObject(car);
-            so.FindProperty("chassis").objectReferenceValue = visual.transform;
-            so.FindProperty("groundMask").intValue = 1 << GroundLayer;
-            so.FindProperty("front").FindPropertyRelative("leftVisual").objectReferenceValue = fl;
-            so.FindProperty("front").FindPropertyRelative("rightVisual").objectReferenceValue = fr;
-            so.FindProperty("front").FindPropertyRelative("suspensionVisual").objectReferenceValue = susF.transform;
-            so.FindProperty("front").FindPropertyRelative("localZ").floatValue = FrontZ;
-            so.FindProperty("rear").FindPropertyRelative("leftVisual").objectReferenceValue = rl;
-            so.FindProperty("rear").FindPropertyRelative("rightVisual").objectReferenceValue = rr;
-            so.FindProperty("rear").FindPropertyRelative("suspensionVisual").objectReferenceValue = susR.transform;
-            so.FindProperty("rear").FindPropertyRelative("localZ").floatValue = RearZ;
-            so.FindProperty("wheelRadius").floatValue = WheelRadius;
-            so.FindProperty("axleHalfWidth").floatValue = AxleHalf;
-            so.FindProperty("centerOfMass").vector3Value = new Vector3(0f, -0.2f, 0.1f);
-            so.FindProperty("motorForce").floatValue = 1850f;
-            so.FindProperty("reverseForce").floatValue = 1500f;
-            so.FindProperty("groundPitchTorque").floatValue = 7f;
-            so.FindProperty("airPitchTorque").floatValue = 20f;
-            so.FindProperty("spring").floatValue = 52000f;
-            so.FindProperty("damper").floatValue = 3500f;
-            so.FindProperty("suspensionRestLength").floatValue = 0.12f;
+            so.FindProperty("settings").objectReferenceValue = carSettings;
+            so.FindProperty("chassisPhysics").objectReferenceValue = chassis.transform;
+            ConfigureAxle(so.FindProperty("front"), "Front", suspensionParentFront, topFront, bottomFront, wheelFront, fl, fr, suspensionVisualFront);
+            ConfigureAxle(so.FindProperty("rear"), "Rear", suspensionParentRear, topRear, bottomRear, wheelRear, rl, rr, suspensionVisualRear);
             so.ApplyModifiedProperties();
 
             SetLayerRecursively(root, VehicleLayer);
             return car;
+        }
+
+        static Transform CreateBottom(Transform parent, string name, Vector3 localPosition)
+        {
+            Transform bottom = new GameObject(name).transform;
+            bottom.SetParent(parent, false);
+            bottom.localPosition = localPosition;
+            bottom.gameObject.layer = VehicleLayer;
+            bottom.gameObject.AddComponent<Rigidbody>();
+            bottom.gameObject.AddComponent<ConfigurableJoint>();
+            return bottom;
+        }
+
+        static Transform CreateWheelCollider(Transform parent, string name, Vector3 localPosition)
+        {
+            Transform wheel = new GameObject(name).transform;
+            wheel.SetParent(parent, false);
+            wheel.localPosition = localPosition;
+            wheel.gameObject.layer = VehicleLayer;
+            wheel.gameObject.AddComponent<Rigidbody>();
+            wheel.gameObject.AddComponent<ConfigurableJoint>();
+            SphereCollider sphere = wheel.gameObject.AddComponent<SphereCollider>();
+            sphere.radius = 0.515f;
+            return wheel;
+        }
+
+        static void ConfigureAxle(SerializedProperty property, string name, Transform suspensionParent,
+            Transform top, Transform bottom, Transform wheelCollider, Transform left, Transform right,
+            Transform suspensionVisual)
+        {
+            property.FindPropertyRelative("name").stringValue = name;
+            property.FindPropertyRelative("suspensionParent").objectReferenceValue = suspensionParent;
+            property.FindPropertyRelative("top").objectReferenceValue = top;
+            property.FindPropertyRelative("bottom").objectReferenceValue = bottom;
+            property.FindPropertyRelative("wheelCollider").objectReferenceValue = wheelCollider;
+            property.FindPropertyRelative("leftVisual").objectReferenceValue = left;
+            property.FindPropertyRelative("rightVisual").objectReferenceValue = right;
+            property.FindPropertyRelative("suspensionVisual").objectReferenceValue = suspensionVisual;
+            property.FindPropertyRelative("suspensionJoint").objectReferenceValue = bottom.GetComponent<ConfigurableJoint>();
+            property.FindPropertyRelative("wheelJoint").objectReferenceValue = wheelCollider.GetComponent<ConfigurableJoint>();
         }
 
         static GameObject PlaceModel(string path, Transform parent, string name, Vector3 localPos, Vector3 localScale)

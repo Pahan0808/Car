@@ -38,65 +38,49 @@ namespace DriveMad
             [System.NonSerialized] public float groundY;
         }
 
-        [Header("Physics")]
-        [SerializeField] Transform chassisPhysics;
-        [SerializeField] float mass = 200f;
-        [SerializeField] Vector3 centerOfMass = new Vector3(0f, 0f, 0f);
-        [SerializeField] float linearDamping = 0.04f;
-        [SerializeField] float angularDamping = 0.22f;
+        [Header("Data")]
+        [Tooltip("All tuning values live here. Scene wiring stays on this component.")]
+        [SerializeField] CarSettings settings;
 
-        [Header("Axles")]
+        [Header("Scene wiring")]
+        [SerializeField] Transform chassisPhysics;
         [SerializeField] AxleSetup front = new AxleSetup { name = "Front" };
         [SerializeField] AxleSetup rear = new AxleSetup { name = "Rear" };
-        [SerializeField] float bottomMass = 4f;
-        [SerializeField] float wheelMass = 24f;
-        [SerializeField] float wheelRadius = 0.34f;
 
-        [Header("Suspension")]
-        [Tooltip("Off = keep your ConfigurableJoint settings; only connectedBody is wired.")]
-        [SerializeField] bool autoConfigureJoints = true;
-        [Tooltip("Compression / extension travel from ride height (symmetric).")]
-        [SerializeField] float suspensionTravel = 0.12f;
-        [Tooltip("Gap between chassis box bottom and wheel top at full compression.")]
-        [SerializeField] float bodyWheelClearance = 0.03f;
-        [SerializeField] float suspensionSpring = 28000f;
-        [SerializeField] float suspensionDamper = 3200f;
-        [Tooltip("1 = critically damped, >1 = overdamped. Solved implicitly, so high values stay stable.")]
-        [SerializeField] float suspensionDampingRatio = 2f;
-        [SerializeField] float maxSuspensionForce = 6000f;
-        [Tooltip("Share of the spring reaction applied at the axle mount; the rest goes to the center of mass. Lower = less body rocking.")]
-        [Range(0f, 1f)]
-        [SerializeField] float suspensionPitchTransfer = 0.6f;
-        [Tooltip("Move the center of mass to the midpoint between the axle mounts so both springs carry the same load.")]
-        [SerializeField] bool autoBalanceCenterOfMass = true;
-
-        [Header("Motor / grip")]
-        [SerializeField] float maxWheelSpin = 90f;
-        [Tooltip("Slip stiffness: traction acceleration per m/s of wheel-vs-ground slip.")]
-        [SerializeField] float longitudinalGrip = 22f;
-        [Tooltip("Traction acceleration cap per axle (m/s^2). Both axles are driven.")]
-        [SerializeField] float maxTractionAccel = 12f;
-        [SerializeField] float maxSpeed = 18f;
-        [SerializeField] float wheelieAssist = 0.1f;
-        [SerializeField] float airPitchTorque = 5f;
-        [SerializeField] float airAngularDamping = 0.1f;
-        [Tooltip("Local spin axis on ColliderWheels Rigidbody; child meshes follow automatically.")]
-        [SerializeField] Vector3 wheelSpinAxis = Vector3.up;
-        [Tooltip("PhysX friction on the wheel colliders. Keep it low: traction is solved by the slip model.")]
-        [Range(0f, 1f)]
-        [SerializeField] float wheelFriction = 0.35f;
-        [Tooltip("Wheel spin decay per second while coasting.")]
-        [SerializeField] float rollingResistance = 0.8f;
-
-        [Header("Crash")]
-        [Tooltip("Body tilt from upright, in degrees, at which the car counts as rolled over.")]
-        [Range(10f, 180f)]
-        [SerializeField] float upsideDownAngle = 80f;
-
-        [Header("Collision")]
-        [SerializeField] LayerMask groundMask = 1 << 8;
         const int WheelPhysicsLayer = 0;
 
+        // Tuning is read through the settings asset. The property names match the previous fields so
+        // the physics code below is untouched by the move to ScriptableObjects.
+        float mass => Settings.mass;
+        Vector3 centerOfMass => Settings.centerOfMass;
+        float linearDamping => Settings.linearDamping;
+        float angularDamping => Settings.angularDamping;
+        float bottomMass => Settings.bottomMass;
+        float wheelMass => Settings.wheelMass;
+        float wheelRadius => Settings.wheelRadius;
+        bool autoConfigureJoints => Settings.autoConfigureJoints;
+        float suspensionTravel => Settings.suspensionTravel;
+        float bodyWheelClearance => Settings.bodyWheelClearance;
+        float suspensionSpring => Settings.suspensionSpring;
+        float suspensionDamper => Settings.suspensionDamper;
+        float suspensionDampingRatio => Settings.suspensionDampingRatio;
+        float maxSuspensionForce => Settings.maxSuspensionForce;
+        float suspensionPitchTransfer => Settings.suspensionPitchTransfer;
+        bool autoBalanceCenterOfMass => Settings.autoBalanceCenterOfMass;
+        float maxWheelSpin => Settings.maxWheelSpin;
+        float longitudinalGrip => Settings.longitudinalGrip;
+        float maxTractionAccel => Settings.maxTractionAccel;
+        float maxSpeed => Settings.maxSpeed;
+        float wheelieAssist => Settings.wheelieAssist;
+        float airPitchTorque => Settings.airPitchTorque;
+        float airAngularDamping => Settings.airAngularDamping;
+        Vector3 wheelSpinAxis => Settings.wheelSpinAxis;
+        float wheelFriction => Settings.wheelFriction;
+        float rollingResistance => Settings.rollingResistance;
+        float upsideDownAngle => Settings.upsideDownAngle;
+        LayerMask groundMask => Settings.groundMask;
+
+        CarSettings _runtimeSettings;
         Rigidbody _chassis;
         AxleSetup[] _axles;
         PhysicsMaterial _wheelMaterial;
@@ -111,6 +95,28 @@ namespace DriveMad
         public bool IsUpsideDown { get; private set; }
         public Rigidbody Body => _chassis;
         public Transform Chassis => chassisPhysics != null ? chassisPhysics : transform;
+
+        CarSettings Settings
+        {
+            get
+            {
+                if (settings != null)
+                {
+                    return settings;
+                }
+
+                if (_runtimeSettings == null)
+                {
+                    Debug.LogError($"DriveMad: {name} has no CarSettings assigned, falling back to defaults.", this);
+                    _runtimeSettings = ScriptableObject.CreateInstance<CarSettings>();
+                }
+
+                return _runtimeSettings;
+            }
+        }
+
+        public CarSettings CurrentSettings => Settings;
+        public void SetSettings(CarSettings value) => settings = value;
 
         public void SetThrottle(float value) => _throttle = Mathf.Clamp(value, -1f, 1f);
         public void SetChassis(Transform value) => chassisPhysics = value;
