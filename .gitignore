@@ -104,3 +104,11 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+# JetBrains Rider and IDE configs
+.idea/
+*.idea/
+
+# NuGetForUnity specific (exclude the Packages/ directory if you want to ignore all packages)
+# If you want to ignore all NuGet packages:
+/[Aa]ssets/Packages/
+/[Aa]ssets/Packages.meta
