@@ -88,6 +88,11 @@ namespace DriveMad
         [Tooltip("Wheel spin decay per second while coasting.")]
         [SerializeField] float rollingResistance = 0.8f;
 
+        [Header("Crash")]
+        [Tooltip("Body tilt from upright, in degrees, at which the car counts as rolled over.")]
+        [Range(10f, 180f)]
+        [SerializeField] float upsideDownAngle = 80f;
+
         [Header("Collision")]
         [SerializeField] LayerMask groundMask = 1 << 8;
         const int WheelPhysicsLayer = 0;
@@ -856,7 +861,7 @@ namespace DriveMad
                 return;
             }
 
-            IsUpsideDown = Vector3.Dot(chassisPhysics.up, Vector3.up) < 0.15f;
+            IsUpsideDown = Vector3.Angle(chassisPhysics.up, Vector3.up) >= upsideDownAngle;
 
             for (int i = 0; i < _axles.Length; i++)
             {
