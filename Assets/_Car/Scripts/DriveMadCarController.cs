@@ -32,6 +32,7 @@ namespace DriveMad
             [System.NonSerialized] public Vector3 wheelLocalOnBottom;
             [System.NonSerialized] public Quaternion wheelLocalRotOnBottom;
             [System.NonSerialized] public float minSpringLength;
+            [System.NonSerialized] public float authoredSpringLength;
             [System.NonSerialized] public float restSpringLength;
             [System.NonSerialized] public float maxSpringLength;
             [System.NonSerialized] public float groundY;
@@ -60,17 +61,32 @@ namespace DriveMad
         [SerializeField] float bodyWheelClearance = 0.03f;
         [SerializeField] float suspensionSpring = 28000f;
         [SerializeField] float suspensionDamper = 3200f;
+        [Tooltip("1 = critically damped, >1 = overdamped. Solved implicitly, so high values stay stable.")]
+        [SerializeField] float suspensionDampingRatio = 2f;
         [SerializeField] float maxSuspensionForce = 6000f;
+        [Tooltip("Share of the spring reaction applied at the axle mount; the rest goes to the center of mass. Lower = less body rocking.")]
+        [Range(0f, 1f)]
+        [SerializeField] float suspensionPitchTransfer = 0.6f;
+        [Tooltip("Move the center of mass to the midpoint between the axle mounts so both springs carry the same load.")]
+        [SerializeField] bool autoBalanceCenterOfMass = true;
 
         [Header("Motor / grip")]
         [SerializeField] float maxWheelSpin = 90f;
+        [Tooltip("Slip stiffness: traction acceleration per m/s of wheel-vs-ground slip.")]
         [SerializeField] float longitudinalGrip = 22f;
+        [Tooltip("Traction acceleration cap per axle (m/s^2). Both axles are driven.")]
+        [SerializeField] float maxTractionAccel = 12f;
         [SerializeField] float maxSpeed = 18f;
         [SerializeField] float wheelieAssist = 0.1f;
         [SerializeField] float airPitchTorque = 5f;
         [SerializeField] float airAngularDamping = 0.1f;
         [Tooltip("Local spin axis on ColliderWheels Rigidbody; child meshes follow automatically.")]
         [SerializeField] Vector3 wheelSpinAxis = Vector3.up;
+        [Tooltip("PhysX friction on the wheel colliders. Keep it low: traction is solved by the slip model.")]
+        [Range(0f, 1f)]
+        [SerializeField] float wheelFriction = 0.35f;
+        [Tooltip("Wheel spin decay per second while coasting.")]
+        [SerializeField] float rollingResistance = 0.8f;
 
         [Header("Collision")]
         [SerializeField] LayerMask groundMask = 1 << 8;
@@ -78,10 +94,12 @@ namespace DriveMad
 
         Rigidbody _chassis;
         AxleSetup[] _axles;
+        PhysicsMaterial _wheelMaterial;
         Collider[] _chassisColliders;
         float _bodyBottomLocalY;
         float _throttle;
         bool _physicsFrozen;
+        bool _wrecked;
 
         public float Throttle => _throttle;
         public bool IsGrounded { get; private set; }
@@ -109,6 +127,72 @@ namespace DriveMad
             ApplyKinematic(freeze);
         }
 
+        /// <summary>
+        /// Crash state: stop driving the car and let the parts behave as plain rigid bodies.
+        /// The wheels detach from the axles; the body already collides with the ground, so it only
+        /// needs its wheel contacts back.
+        /// </summary>
+        public void Wreck()
+        {
+            if (_wrecked || _chassis == null || _axles == null)
+            {
+                return;
+            }
+
+            _wrecked = true;
+            _throttle = 0f;
+
+            for (int i = 0; i < _axles.Length; i++)
+            {
+                AxleSetup axle = _axles[i];
+
+                // Wheels come off.
+                if (axle.wheelJoint != null)
+                {
+                    Destroy(axle.wheelJoint);
+                    axle.wheelJoint = null;
+                }
+
+                // The suspension stops solving, so lock it instead of letting Bottom slide forever
+                // along the free Y axis: body + springs become one piece of debris.
+                if (axle.suspensionJoint != null)
+                {
+                    axle.suspensionJoint.yMotion = ConfigurableJointMotion.Locked;
+                }
+
+                if (axle.bottomBody != null)
+                {
+                    axle.bottomBody.constraints = RigidbodyConstraints.FreezePositionX;
+                }
+
+                if (axle.wheelBody != null)
+                {
+                    axle.wheelBody.constraints = RigidbodyConstraints.FreezePositionX;
+                }
+
+                RestoreChassisCollision(axle.wheelCol);
+            }
+
+            _chassis.constraints = RigidbodyConstraints.FreezePositionX;
+        }
+
+        void RestoreChassisCollision(Collider wheelCol)
+        {
+            if (_chassisColliders == null || wheelCol == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _chassisColliders.Length; i++)
+            {
+                Collider c = _chassisColliders[i];
+                if (c != null && c != wheelCol)
+                {
+                    Physics.IgnoreCollision(wheelCol, c, false);
+                }
+            }
+        }
+
         void Awake()
         {
             ResolveChassis();
@@ -117,8 +201,42 @@ namespace DriveMad
 
         void Start()
         {
-            AlignVehicleToGround();
+            // The scene pose is the authored rest pose. Do not average axle heights or move the
+            // chassis here: that would make front and rear springs start with different lengths.
+            // Gravity is set by LevelSession.Awake, so the preload is computed here, not in Awake.
+            BalanceCenterOfMass();
+            ApplyStaticPreload();
+            ResetRuntimeVelocities();
             Physics.SyncTransforms();
+        }
+
+        void ResetRuntimeVelocities()
+        {
+            if (_chassis != null)
+            {
+                _chassis.linearVelocity = Vector3.zero;
+                _chassis.angularVelocity = Vector3.zero;
+            }
+
+            if (_axles == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _axles.Length; i++)
+            {
+                if (_axles[i].bottomBody != null)
+                {
+                    _axles[i].bottomBody.linearVelocity = Vector3.zero;
+                    _axles[i].bottomBody.angularVelocity = Vector3.zero;
+                }
+
+                if (_axles[i].wheelBody != null)
+                {
+                    _axles[i].wheelBody.linearVelocity = Vector3.zero;
+                    _axles[i].wheelBody.angularVelocity = Vector3.zero;
+                }
+            }
         }
 
         void ResolveChassis()
@@ -373,6 +491,28 @@ namespace DriveMad
 
             sphere.radius = axle.radius;
             sphere.center = Vector3.zero;
+            sphere.sharedMaterial = GetWheelMaterial();
+        }
+
+        /// <summary>
+        /// Low PhysX friction so the wheels can roll and slide freely. Drive force comes from the
+        /// explicit slip model in ApplyTraction, not from the contact solver.
+        /// </summary>
+        PhysicsMaterial GetWheelMaterial()
+        {
+            if (_wheelMaterial == null)
+            {
+                _wheelMaterial = new PhysicsMaterial("DriveMadWheel")
+                {
+                    frictionCombine = PhysicsMaterialCombine.Multiply,
+                    bounceCombine = PhysicsMaterialCombine.Minimum,
+                    bounciness = 0f
+                };
+            }
+
+            _wheelMaterial.dynamicFriction = wheelFriction;
+            _wheelMaterial.staticFriction = wheelFriction;
+            return _wheelMaterial;
         }
 
         static void SetLayerRecursive(Transform root, int layer)
@@ -388,17 +528,83 @@ namespace DriveMad
         {
             float mountLocalY = axle.topLocalOnChassis.y;
             float wheelCenterAboveBottom = axle.wheelLocalOnBottom.y;
-            float wheelTopAboveBottom = wheelCenterAboveBottom + axle.radius;
 
             // Fully compressed: body box bottom sits bodyWheelClearance above wheel tops.
             float chassisYAtFullCompress = axle.radius * 2f + bodyWheelClearance - _bodyBottomLocalY;
             float bottomYAtFullCompress = axle.radius - wheelCenterAboveBottom;
-            float minLength = (mountLocalY + chassisYAtFullCompress) - bottomYAtFullCompress;
-            minLength = Mathf.Max(0.08f, minLength);
+            float clearanceMin = Mathf.Max(0.02f, (mountLocalY + chassisYAtFullCompress) - bottomYAtFullCompress);
 
-            axle.minSpringLength = minLength;
-            axle.restSpringLength = minLength + suspensionTravel;
-            axle.maxSpringLength = minLength + suspensionTravel * 2f;
+            // The ride height authored in the scene is the pose the car must keep while standing.
+            Vector3 mount = chassisPhysics.TransformPoint(axle.topLocalOnChassis);
+            float authored = Vector3.Dot(axle.bottom.position - mount, -chassisPhysics.up);
+            if (authored <= 0.02f)
+            {
+                authored = clearanceMin + suspensionTravel;
+            }
+
+            axle.authoredSpringLength = authored;
+            // Rest length gets its static preload in ApplyStaticPreload once both axles are known.
+            axle.restSpringLength = authored;
+            // Travel is symmetric around the authored height: the body can rise or drop while driving.
+            axle.minSpringLength = Mathf.Max(Mathf.Min(clearanceMin, authored), authored - suspensionTravel);
+            axle.maxSpringLength = authored + suspensionTravel;
+        }
+
+        /// <summary>
+        /// Puts the center of mass exactly between the axle mounts, so the static load splits evenly
+        /// and neither end sags more than the other.
+        /// </summary>
+        void BalanceCenterOfMass()
+        {
+            if (!autoBalanceCenterOfMass || _chassis == null || _axles == null || _axles.Length < 2)
+            {
+                return;
+            }
+
+            float midZ = (_axles[0].topLocalOnChassis.z + _axles[1].topLocalOnChassis.z) * 0.5f;
+            _chassis.centerOfMass = new Vector3(centerOfMass.x, centerOfMass.y, midZ);
+        }
+
+        /// <summary>
+        /// Static preload. At the authored length the spring error is zero, so it carries no weight and
+        /// the body has to sink until compression matches the load. Offsetting the rest length by the
+        /// per-axle static sag makes the authored pose the real equilibrium.
+        /// </summary>
+        void ApplyStaticPreload()
+        {
+            if (_chassis == null || _axles == null || _axles.Length == 0 || suspensionSpring <= 0.01f)
+            {
+                return;
+            }
+
+            float totalLoad = mass * Mathf.Abs(Physics.gravity.y);
+
+            for (int i = 0; i < _axles.Length; i++)
+            {
+                float share = GetStaticLoadShare(i);
+                float sag = (totalLoad * share) / suspensionSpring;
+                _axles[i].restSpringLength = _axles[i].authoredSpringLength + sag;
+            }
+        }
+
+        float GetStaticLoadShare(int index)
+        {
+            if (_axles.Length != 2)
+            {
+                return 1f / _axles.Length;
+            }
+
+            int other = index == 0 ? 1 : 0;
+            float own = _axles[index].topLocalOnChassis.z;
+            float opposite = _axles[other].topLocalOnChassis.z;
+            float span = own - opposite;
+            if (Mathf.Abs(span) < 0.001f)
+            {
+                return 0.5f;
+            }
+
+            // Lever rule around the opposite axle mount.
+            return Mathf.Clamp01((_chassis.centerOfMass.z - opposite) / span);
         }
 
         void SetupJoints(AxleSetup axle)
@@ -645,7 +851,7 @@ namespace DriveMad
 
         void FixedUpdate()
         {
-            if (_physicsFrozen || _chassis == null || _axles == null)
+            if (_physicsFrozen || _wrecked || _chassis == null || _axles == null)
             {
                 return;
             }
@@ -668,19 +874,25 @@ namespace DriveMad
             {
                 AxleSetup axle = _axles[i];
                 ApplyWheelMotor(axle);
-                if (IsAxleGrounded(axle))
+                if (TryGetGroundHit(axle, out RaycastHit hit))
                 {
+                    // Both axles are driven: traction is applied at each contact patch, so a hard
+                    // launch naturally pitches the body up and can flip it over.
+                    ApplyTraction(axle, hit);
                     grounded++;
                 }
             }
 
             IsGrounded = grounded > 0;
 
-            float pitch = IsGrounded ? wheelieAssist : airPitchTorque;
-            _chassis.AddTorque(-chassisPhysics.right * (_throttle * pitch), ForceMode.Acceleration);
             if (!IsGrounded)
             {
+                _chassis.AddTorque(-chassisPhysics.right * (_throttle * airPitchTorque), ForceMode.Acceleration);
                 _chassis.angularVelocity *= Mathf.Clamp01(1f - airAngularDamping * Time.fixedDeltaTime);
+            }
+            else if (wheelieAssist > 0f)
+            {
+                _chassis.AddTorque(-chassisPhysics.right * (_throttle * wheelieAssist), ForceMode.Acceleration);
             }
 
             LimitSpeed();
@@ -694,28 +906,92 @@ namespace DriveMad
             }
 
             Vector3 mount = chassisPhysics.TransformPoint(axle.topLocalOnChassis);
-            // The side-view vehicle uses world Y as the suspension axis.
-            // Using chassis.up here creates a positive feedback loop once the body pitches.
-            Vector3 down = Vector3.down;
-            float currentLength = Vector3.Dot(axle.bottomBody.position - mount, down);
-            currentLength = Mathf.Clamp(currentLength, axle.minSpringLength, axle.maxSpringLength);
+            // Must match the joint's free axis, which is the chassis local Y. Measuring along world Y
+            // instead makes the travel limit blind once the body pitches up, and the suspension
+            // stretches without bound during a wheelie.
+            Vector3 down = -chassisPhysics.up;
+            float rawLength = Vector3.Dot(axle.bottomBody.position - mount, down);
+            float currentLength = Mathf.Clamp(rawLength, axle.minSpringLength, axle.maxSpringLength);
 
             float error = axle.restSpringLength - currentLength;
-            float relVel = Vector3.Dot(axle.bottomBody.linearVelocity - _chassis.linearVelocity, down);
-
-            // Keep the explicit spring numerically stable at the project's fixed timestep.
-            // The old damper value was far above critical damping for an 8 kg Bottom body,
-            // which made the solver inject energy and launch the whole vehicle at idle.
-            float effectiveMass = (bottomMass * mass) / Mathf.Max(0.01f, bottomMass + mass);
-            float criticalDamper = 2f * Mathf.Sqrt(Mathf.Max(0.01f, suspensionSpring) * effectiveMass);
-            float stableDamper = Mathf.Min(suspensionDamper, criticalDamper * 1.1f);
-            float force = error * suspensionSpring - relVel * stableDamper;
-            force = Mathf.Clamp(force, -maxSuspensionForce, maxSuspensionForce);
+            float force = Mathf.Clamp(error * suspensionSpring, -maxSuspensionForce, maxSuspensionForce);
 
             axle.bottomBody.AddForce(down * force, ForceMode.Force);
-            // Apply the reaction at the axle mount, not at the center of mass, so that a loaded
-            // front or rear spring produces real pitch torque on the body.
-            _chassis.AddForceAtPosition(-down * force, mount, ForceMode.Force);
+            ApplyToChassis(-down * force, mount, ForceMode.Force);
+
+            ApplySuspensionDamping(axle, mount, down);
+            ClampSuspensionTravel(axle, mount, down, rawLength);
+        }
+
+        /// <summary>
+        /// Implicit (velocity level) damper. An explicit force damper explodes once the coefficient
+        /// passes 2 * m / dt, which for a light Bottom body capped the damping far below what the
+        /// suspension needs. Solving it as an impulse stays stable at any damping ratio.
+        /// </summary>
+        void ApplySuspensionDamping(AxleSetup axle, Vector3 mount, Vector3 down)
+        {
+            float relVel = Vector3.Dot(axle.bottomBody.linearVelocity - _chassis.linearVelocity, down);
+            if (Mathf.Abs(relVel) < 0.0001f)
+            {
+                return;
+            }
+
+            float effectiveMass = (bottomMass * mass) / Mathf.Max(0.01f, bottomMass + mass);
+            float criticalDamper = 2f * Mathf.Sqrt(Mathf.Max(0.01f, suspensionSpring) * effectiveMass);
+            float damper = Mathf.Min(criticalDamper * Mathf.Max(0f, suspensionDampingRatio), suspensionDamper);
+
+            float dt = Time.fixedDeltaTime;
+            float blend = (damper * dt) / (effectiveMass + damper * dt);
+            Vector3 impulse = down * (relVel * blend * effectiveMass);
+
+            axle.bottomBody.AddForce(-impulse, ForceMode.Impulse);
+            ApplyToChassis(impulse, mount, ForceMode.Impulse);
+        }
+
+        /// <summary>
+        /// Part of the load goes to the axle mount so the body can pitch on slopes, the rest goes to
+        /// the center of mass. Sending all of it to the mount makes the body rock at idle.
+        /// </summary>
+        void ApplyToChassis(Vector3 value, Vector3 mount, ForceMode mode)
+        {
+            _chassis.AddForceAtPosition(value * suspensionPitchTransfer, mount, mode);
+            _chassis.AddForce(value * (1f - suspensionPitchTransfer), mode);
+        }
+
+        /// <summary>
+        /// Hard bump stops. The joint keeps Y free so the explicit spring can solve, which means
+        /// nothing else bounds the travel: without this the spring saturates and Bottom can drift
+        /// past its range, even above the Top mount.
+        /// </summary>
+        void ClampSuspensionTravel(AxleSetup axle, Vector3 mount, Vector3 down, float rawLength)
+        {
+            float clamped = Mathf.Clamp(rawLength, axle.minSpringLength, axle.maxSpringLength);
+            Vector3 offset = axle.bottomBody.position - mount;
+            Vector3 lateral = offset - down * rawLength;
+            bool outOfRange = Mathf.Abs(clamped - rawLength) > 0.0001f;
+
+            // Snapping back onto the axis line also removes any sideways drift the solver allowed,
+            // so the suspension can never look stretched.
+            if (!outOfRange && lateral.sqrMagnitude < 0.0001f)
+            {
+                return;
+            }
+
+            axle.bottomBody.position = mount + down * clamped;
+
+            if (!outOfRange)
+            {
+                return;
+            }
+
+            // Absorb the motion into the stop instead of bouncing off it.
+            Vector3 v = axle.bottomBody.linearVelocity;
+            float relAlong = Vector3.Dot(v - _chassis.linearVelocity, down);
+            bool pushingIntoStop = rawLength > clamped ? relAlong > 0f : relAlong < 0f;
+            if (pushingIntoStop)
+            {
+                axle.bottomBody.linearVelocity = v - down * relAlong;
+            }
         }
 
         void ApplyWheelMotor(AxleSetup axle)
@@ -725,7 +1001,7 @@ namespace DriveMad
                 return;
             }
 
-            Vector3 axleAxis = GetSpinAxisWorld(axle.wheelCollider);
+            Vector3 axleAxis = GetDriveAxisWorld(axle.wheelCollider);
             float targetOmega = _throttle * maxWheelSpin;
             Vector3 ang = axle.wheelBody.angularVelocity;
             ang -= Vector3.Project(ang, axleAxis);
@@ -737,6 +1013,42 @@ namespace DriveMad
         {
             Vector3 local = wheelSpinAxis.sqrMagnitude > 0.0001f ? wheelSpinAxis.normalized : Vector3.up;
             return wheelRoot.TransformDirection(local);
+        }
+
+        /// <summary>
+        /// Spin axis oriented so that a positive angular velocity always rolls the car forward,
+        /// regardless of how the wheel rig is rotated in the scene.
+        /// </summary>
+        Vector3 GetDriveAxisWorld(Transform wheelRoot)
+        {
+            Vector3 axis = GetSpinAxisWorld(wheelRoot);
+            return Vector3.Dot(axis, chassisPhysics.right) < 0f ? -axis : axis;
+        }
+
+        void ApplyTraction(AxleSetup axle, RaycastHit hit)
+        {
+            Vector3 axis = GetDriveAxisWorld(axle.wheelCollider);
+            float omega = Vector3.Dot(axle.wheelBody.angularVelocity, axis);
+
+            Vector3 forward = Vector3.ProjectOnPlane(chassisPhysics.forward, hit.normal);
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                return;
+            }
+
+            forward.Normalize();
+
+            float radius = axle.radius > 0.05f ? axle.radius : wheelRadius;
+            float wheelSurfaceSpeed = omega * radius;
+            float bodySpeed = Vector3.Dot(_chassis.linearVelocity, forward);
+            float slip = wheelSurfaceSpeed - bodySpeed;
+
+            float accel = Mathf.Clamp(slip * longitudinalGrip, -maxTractionAccel, maxTractionAccel);
+            float loadPerAxle = mass / Mathf.Max(1, _axles.Length);
+
+            // Force enters the body at ground level, so the moment arm to the center of mass
+            // produces the wheelie / roll-over behaviour instead of a pure translation.
+            _chassis.AddForceAtPosition(forward * (accel * loadPerAxle), hit.point, ForceMode.Force);
         }
 
         void LimitSpeed()
@@ -756,23 +1068,49 @@ namespace DriveMad
         void HoldWhileIdle()
         {
             int grounded = 0;
+            Vector3 normalSum = Vector3.zero;
             for (int i = 0; i < _axles.Length; i++)
             {
-                ApplyWheelMotor(_axles[i]);
-                if (IsAxleGrounded(_axles[i]))
+                // No hard brake with the throttle released: the wheels keep rolling, they only
+                // lose spin through rolling resistance so the car can still coast downhill.
+                if (TryGetGroundHit(_axles[i], out RaycastHit hit))
                 {
                     grounded++;
+                    normalSum += hit.normal;
                 }
 
+                ApplyRollingResistance(_axles[i]);
+            }
+
+            IsGrounded = grounded > 0;
+
+            // No parking assist: the car coasts and stops purely through physics.
+            for (int i = 0; i < _axles.Length; i++)
+            {
                 DampSmallMotion(_axles[i].bottomBody);
                 DampSmallMotion(_axles[i].wheelBody);
             }
 
-            IsGrounded = grounded > 0;
             DampSmallMotion(_chassis);
-            _chassis.angularVelocity *= 0.75f;
+
+            // Calm the body pitch while coasting so the springs settle instead of rocking.
+            _chassis.angularVelocity *= Mathf.Clamp01(1f - 2f * Time.fixedDeltaTime);
         }
 
+        void ApplyRollingResistance(AxleSetup axle)
+        {
+            if (axle.wheelBody == null)
+            {
+                return;
+            }
+
+            axle.wheelBody.angularVelocity *= Mathf.Clamp01(1f - rollingResistance * Time.fixedDeltaTime);
+        }
+
+        /// <summary>
+        /// Keeps the side-view rig on its lateral rail. No longitudinal damping: braking and
+        /// stopping are left to physics.
+        /// </summary>
         static void DampSmallMotion(Rigidbody rb)
         {
             if (rb == null)
@@ -782,13 +1120,14 @@ namespace DriveMad
 
             Vector3 v = rb.linearVelocity;
             v.x = 0f;
-            v.z *= 0.65f;
-            v.y *= 0.65f;
             rb.linearVelocity = v;
         }
 
-        bool IsAxleGrounded(AxleSetup axle)
+        bool IsAxleGrounded(AxleSetup axle) => TryGetGroundHit(axle, out _);
+
+        bool TryGetGroundHit(AxleSetup axle, out RaycastHit hit)
         {
+            hit = default;
             if (axle.wheelBody == null)
             {
                 return false;
@@ -796,7 +1135,8 @@ namespace DriveMad
 
             float radius = axle.radius > 0.05f ? axle.radius : wheelRadius;
             Vector3 origin = axle.wheelBody.position + Vector3.up * 0.05f;
-            return Physics.Raycast(origin, Vector3.down, radius + 0.08f, groundMask, QueryTriggerInteraction.Ignore);
+            return Physics.Raycast(origin, Vector3.down, out hit, radius + 0.08f, groundMask,
+                QueryTriggerInteraction.Ignore);
         }
 
         void ApplyKinematic(bool kinematic)

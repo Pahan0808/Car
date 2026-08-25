@@ -31,7 +31,9 @@ namespace DriveMad
         void Awake()
         {
             Physics.gravity = gravity;
-            Physics.IgnoreLayerCollision(8, 9, true);
+            // The body must collide with the ground at all times, not only after a crash.
+            // Wheel-vs-body contacts are disabled per collider pair in the car controller instead.
+            Physics.IgnoreLayerCollision(8, 9, false);
             ShowStatus(string.Empty);
         }
 
@@ -96,7 +98,8 @@ namespace DriveMad
 
             _outcome = outcome;
             car.SetThrottle(0f);
-            car.FreezePhysics(true);
+            // Do not freeze on a crash: the car falls apart and keeps colliding as debris.
+            car.Wreck();
             ShowStatus(message);
         }
 
