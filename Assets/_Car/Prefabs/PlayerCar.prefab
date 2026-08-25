@@ -113,11 +113,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ce37527ab5d50c74188a7009c0747544, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  settings: {fileID: 11400000, guid: b4b81c40984537a46a26d06d939bc566, type: 2}
   chassisPhysics: {fileID: 7123032912980124078}
-  mass: 200
-  centerOfMass: {x: 0, y: 0.08, z: -0.16}
-  linearDamping: 0.04
-  angularDamping: 0.22
   front:
     name: Front
     suspensionParent: {fileID: 2870650806950188751}
@@ -140,32 +137,6 @@ MonoBehaviour:
     suspensionVisual: {fileID: 0}
     suspensionJoint: {fileID: 591353511978577103}
     wheelJoint: {fileID: 8553291257951342574}
-  bottomMass: 8
-  wheelMass: 16
-  wheelRadius: 0.34
-  autoConfigureJoints: 1
-  suspensionTravel: 0.07
-  bodyWheelClearance: 0.03
-  suspensionSpring: 36000
-  suspensionDamper: 2200
-  suspensionDampingRatio: 2
-  maxSuspensionForce: 6000
-  suspensionPitchTransfer: 0.6
-  autoBalanceCenterOfMass: 1
-  maxWheelSpin: 90
-  longitudinalGrip: 8
-  maxTractionAccel: 12
-  maxSpeed: 15
-  wheelieAssist: 0.12
-  airPitchTorque: 6
-  airAngularDamping: 0.1
-  wheelSpinAxis: {x: 0, y: 1, z: 0}
-  wheelFriction: 0.35
-  rollingResistance: 0.8
-  upsideDownAngle: 80
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 256
 --- !u!1 &3460645054675790045
 GameObject:
   m_ObjectHideFlags: 0
