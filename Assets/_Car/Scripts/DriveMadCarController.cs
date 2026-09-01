@@ -49,35 +49,6 @@ namespace DriveMad
 
         const int WheelPhysicsLayer = 0;
 
-        // Tuning is read through the settings asset. The property names match the previous fields so
-        // the physics code below is untouched by the move to ScriptableObjects.
-        float mass => Settings.mass;
-        float centerOfMassHeight => Settings.centerOfMassHeight;
-        float linearDamping => Settings.linearDamping;
-        float angularDamping => Settings.angularDamping;
-        float bottomMass => Settings.bottomMass;
-        float wheelMass => Settings.wheelMass;
-        bool autoConfigureJoints => Settings.autoConfigureJoints;
-        float suspensionTravel => Settings.suspensionTravel;
-        float bodyWheelClearance => Settings.bodyWheelClearance;
-        float suspensionSpring => Settings.suspensionSpring;
-        float suspensionDamper => Settings.suspensionDamper;
-        float suspensionDampingRatio => Settings.suspensionDampingRatio;
-        float maxSuspensionForce => Settings.maxSuspensionForce;
-        float suspensionPitchTransfer => Settings.suspensionPitchTransfer;
-        float maxWheelSpin => Settings.maxWheelSpin;
-        float longitudinalGrip => Settings.longitudinalGrip;
-        float maxTractionAccel => Settings.maxTractionAccel;
-        float maxSpeed => Settings.maxSpeed;
-        float wheelieAssist => Settings.wheelieAssist;
-        float airPitchTorque => Settings.airPitchTorque;
-        float airAngularDamping => Settings.airAngularDamping;
-        Vector3 wheelSpinAxis => Settings.wheelSpinAxis;
-        float wheelFriction => Settings.wheelFriction;
-        float rollingResistance => Settings.rollingResistance;
-        float upsideDownAngle => Settings.upsideDownAngle;
-        LayerMask groundMask => Settings.groundMask;
-
         CarSettings _runtimeSettings;
         Rigidbody _chassis;
         AxleSetup[] _axles;
@@ -271,10 +242,10 @@ namespace DriveMad
                 _chassis = chassisPhysics.gameObject.AddComponent<Rigidbody>();
             }
 
-            _chassis.mass = mass;
+            _chassis.mass = Settings.mass;
             _chassis.useGravity = true;
-            _chassis.linearDamping = linearDamping;
-            _chassis.angularDamping = angularDamping;
+            _chassis.linearDamping = Settings.linearDamping;
+            _chassis.angularDamping = Settings.angularDamping;
             _chassis.interpolation = RigidbodyInterpolation.Interpolate;
             _chassis.collisionDetectionMode = CollisionDetectionMode.Continuous;
             // Side-view vehicle: only pitch (world X) may rotate, roll and yaw stay locked.
@@ -412,7 +383,7 @@ namespace DriveMad
                 axle.bottomBody = axle.bottom.gameObject.AddComponent<Rigidbody>();
             }
 
-            axle.bottomBody.mass = bottomMass;
+            axle.bottomBody.mass = Settings.springFootMass;
             axle.bottomBody.useGravity = true;
             axle.bottomBody.interpolation = RigidbodyInterpolation.Interpolate;
             axle.bottomBody.collisionDetectionMode = CollisionDetectionMode.Continuous;
@@ -434,7 +405,7 @@ namespace DriveMad
                 axle.wheelBody = axle.wheelCollider.gameObject.AddComponent<Rigidbody>();
             }
 
-            axle.wheelBody.mass = wheelMass;
+            axle.wheelBody.mass = Settings.wheelMass;
             axle.wheelBody.useGravity = true;
             axle.wheelBody.interpolation = RigidbodyInterpolation.Interpolate;
             axle.wheelBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
@@ -453,7 +424,7 @@ namespace DriveMad
 
         RigidbodyConstraints GetWheelRotationConstraints()
         {
-            Vector3 spin = wheelSpinAxis.sqrMagnitude > 0.0001f ? wheelSpinAxis.normalized : Vector3.up;
+            Vector3 spin = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
             float ax = Mathf.Abs(spin.x);
             float ay = Mathf.Abs(spin.y);
             float az = Mathf.Abs(spin.z);
@@ -517,8 +488,8 @@ namespace DriveMad
                 };
             }
 
-            _wheelMaterial.dynamicFriction = wheelFriction;
-            _wheelMaterial.staticFriction = wheelFriction;
+            _wheelMaterial.dynamicFriction = Settings.wheelFriction;
+            _wheelMaterial.staticFriction = Settings.wheelFriction;
             return _wheelMaterial;
         }
 
@@ -537,7 +508,7 @@ namespace DriveMad
             float wheelCenterAboveBottom = axle.wheelLocalOnBottom.y;
 
             // Fully compressed: body box bottom sits bodyWheelClearance above wheel tops.
-            float chassisYAtFullCompress = axle.radius * 2f + bodyWheelClearance - _bodyBottomLocalY;
+            float chassisYAtFullCompress = axle.radius * 2f + Settings.bodyWheelClearance - _bodyBottomLocalY;
             float bottomYAtFullCompress = axle.radius - wheelCenterAboveBottom;
             float clearanceMin = Mathf.Max(0.02f, (mountLocalY + chassisYAtFullCompress) - bottomYAtFullCompress);
 
@@ -546,15 +517,15 @@ namespace DriveMad
             float authored = Vector3.Dot(axle.bottom.position - mount, -chassisPhysics.up);
             if (authored <= 0.02f)
             {
-                authored = clearanceMin + suspensionTravel;
+                authored = clearanceMin + Settings.suspensionTravel;
             }
 
             axle.authoredSpringLength = authored;
             // Rest length gets its static preload in ApplyStaticPreload once both axles are known.
             axle.restSpringLength = authored;
             // Travel is symmetric around the authored height: the body can rise or drop while driving.
-            axle.minSpringLength = Mathf.Max(Mathf.Min(clearanceMin, authored), authored - suspensionTravel);
-            axle.maxSpringLength = authored + suspensionTravel;
+            axle.minSpringLength = Mathf.Max(Mathf.Min(clearanceMin, authored), authored - Settings.suspensionTravel);
+            axle.maxSpringLength = authored + Settings.suspensionTravel;
         }
 
         /// <summary>
@@ -575,7 +546,7 @@ namespace DriveMad
             }
 
             Vector3 calculated = GetChassisGeometryCenter();
-            calculated.y = centerOfMassHeight;
+            calculated.y = Settings.centerOfMassHeight;
             if (_axles != null && _axles.Length >= 2)
             {
                 calculated.z = (_axles[0].topLocalOnChassis.z + _axles[1].topLocalOnChassis.z) * 0.5f;
@@ -624,17 +595,17 @@ namespace DriveMad
         /// </summary>
         void ApplyStaticPreload()
         {
-            if (_chassis == null || _axles == null || _axles.Length == 0 || suspensionSpring <= 0.01f)
+            if (_chassis == null || _axles == null || _axles.Length == 0 || Settings.suspensionSpring <= 0.01f)
             {
                 return;
             }
 
-            float totalLoad = mass * Mathf.Abs(Physics.gravity.y);
+            float totalLoad = Settings.mass * Mathf.Abs(Physics.gravity.y);
 
             for (int i = 0; i < _axles.Length; i++)
             {
                 float share = GetStaticLoadShare(i);
-                float sag = (totalLoad * share) / suspensionSpring;
+                float sag = (totalLoad * share) / Settings.suspensionSpring;
                 _axles[i].restSpringLength = _axles[i].authoredSpringLength + sag;
             }
         }
@@ -684,7 +655,7 @@ namespace DriveMad
             axle.suspensionJoint.connectedBody = _chassis;
             axle.wheelJoint.connectedBody = axle.bottomBody;
 
-            if (autoConfigureJoints)
+            if (Settings.autoConfigureJoints)
             {
                 ConfigureSuspensionJoint(axle);
                 ConfigureWheelJoint(axle);
@@ -733,7 +704,7 @@ namespace DriveMad
             j.projectionAngle = 5f;
             j.linearLimit = new SoftJointLimit
             {
-                limit = suspensionTravel,
+                limit = Settings.suspensionTravel,
                 bounciness = 0f,
                 contactDistance = 0.005f
             };
@@ -749,7 +720,7 @@ namespace DriveMad
             j.autoConfigureConnectedAnchor = false;
             j.anchor = Vector3.zero;
             j.connectedAnchor = axle.wheelLocalOnBottom;
-            j.axis = wheelSpinAxis.sqrMagnitude > 0.0001f ? wheelSpinAxis.normalized : Vector3.up;
+            j.axis = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
             j.secondaryAxis = Vector3.forward;
             j.xMotion = ConfigurableJointMotion.Locked;
             j.yMotion = ConfigurableJointMotion.Locked;
@@ -848,7 +819,7 @@ namespace DriveMad
         {
             Vector3 mountWorld = chassisPhysics.TransformPoint(axle.topLocalOnChassis);
             Vector3 origin = mountWorld + Vector3.up * 4f;
-            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 12f, groundMask, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 12f, Settings.groundMask, QueryTriggerInteraction.Ignore))
             {
                 axle.groundY = hit.point.y;
                 return true;
@@ -913,7 +884,7 @@ namespace DriveMad
                 return;
             }
 
-            IsUpsideDown = Vector3.Angle(chassisPhysics.up, Vector3.up) >= upsideDownAngle;
+            IsUpsideDown = Vector3.Angle(chassisPhysics.up, Vector3.up) >= Settings.upsideDownAngle;
 
             for (int i = 0; i < _axles.Length; i++)
             {
@@ -944,12 +915,12 @@ namespace DriveMad
 
             if (!IsGrounded)
             {
-                _chassis.AddTorque(-chassisPhysics.right * (_throttle * airPitchTorque), ForceMode.Acceleration);
-                _chassis.angularVelocity *= Mathf.Clamp01(1f - airAngularDamping * Time.fixedDeltaTime);
+                _chassis.AddTorque(-chassisPhysics.right * (_throttle * Settings.airPitchTorque), ForceMode.Acceleration);
+                _chassis.angularVelocity *= Mathf.Clamp01(1f - Settings.airAngularDamping * Time.fixedDeltaTime);
             }
-            else if (wheelieAssist > 0f)
+            else if (Settings.wheelieAssist > 0f)
             {
-                _chassis.AddTorque(-chassisPhysics.right * (_throttle * wheelieAssist), ForceMode.Acceleration);
+                _chassis.AddTorque(-chassisPhysics.right * (_throttle * Settings.wheelieAssist), ForceMode.Acceleration);
             }
 
             LimitSpeed();
@@ -971,7 +942,7 @@ namespace DriveMad
             float currentLength = Mathf.Clamp(rawLength, axle.minSpringLength, axle.maxSpringLength);
 
             float error = axle.restSpringLength - currentLength;
-            float force = Mathf.Clamp(error * suspensionSpring, -maxSuspensionForce, maxSuspensionForce);
+            float force = Mathf.Clamp(error * Settings.suspensionSpring, -Settings.maxSuspensionForce, Settings.maxSuspensionForce);
 
             axle.bottomBody.AddForce(down * force, ForceMode.Force);
             ApplyToChassis(-down * force, mount, ForceMode.Force);
@@ -993,9 +964,9 @@ namespace DriveMad
                 return;
             }
 
-            float effectiveMass = (bottomMass * mass) / Mathf.Max(0.01f, bottomMass + mass);
-            float criticalDamper = 2f * Mathf.Sqrt(Mathf.Max(0.01f, suspensionSpring) * effectiveMass);
-            float damper = Mathf.Min(criticalDamper * Mathf.Max(0f, suspensionDampingRatio), suspensionDamper);
+            float effectiveMass = (Settings.springFootMass * Settings.mass) / Mathf.Max(0.01f, Settings.springFootMass + Settings.mass);
+            float criticalDamper = 2f * Mathf.Sqrt(Mathf.Max(0.01f, Settings.suspensionSpring) * effectiveMass);
+            float damper = Mathf.Min(criticalDamper * Mathf.Max(0f, Settings.suspensionDampingRatio), Settings.suspensionDamper);
 
             float dt = Time.fixedDeltaTime;
             float blend = (damper * dt) / (effectiveMass + damper * dt);
@@ -1011,8 +982,8 @@ namespace DriveMad
         /// </summary>
         void ApplyToChassis(Vector3 value, Vector3 mount, ForceMode mode)
         {
-            _chassis.AddForceAtPosition(value * suspensionPitchTransfer, mount, mode);
-            _chassis.AddForce(value * (1f - suspensionPitchTransfer), mode);
+            _chassis.AddForceAtPosition(value * Settings.suspensionPitchTransfer, mount, mode);
+            _chassis.AddForce(value * (1f - Settings.suspensionPitchTransfer), mode);
         }
 
         /// <summary>
@@ -1059,7 +1030,7 @@ namespace DriveMad
             }
 
             Vector3 axleAxis = GetDriveAxisWorld(axle.wheelCollider);
-            float targetOmega = _throttle * maxWheelSpin;
+            float targetOmega = _throttle * Settings.maxWheelSpin;
             Vector3 ang = axle.wheelBody.angularVelocity;
             ang -= Vector3.Project(ang, axleAxis);
             ang += axleAxis * targetOmega;
@@ -1068,7 +1039,7 @@ namespace DriveMad
 
         Vector3 GetSpinAxisWorld(Transform wheelRoot)
         {
-            Vector3 local = wheelSpinAxis.sqrMagnitude > 0.0001f ? wheelSpinAxis.normalized : Vector3.up;
+            Vector3 local = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
             return wheelRoot.TransformDirection(local);
         }
 
@@ -1100,8 +1071,8 @@ namespace DriveMad
             float bodySpeed = Vector3.Dot(_chassis.linearVelocity, forward);
             float slip = wheelSurfaceSpeed - bodySpeed;
 
-            float accel = Mathf.Clamp(slip * longitudinalGrip, -maxTractionAccel, maxTractionAccel);
-            float loadPerAxle = mass / Mathf.Max(1, _axles.Length);
+            float accel = Mathf.Clamp(slip * Settings.longitudinalGrip, -Settings.maxTractionAccel, Settings.maxTractionAccel);
+            float loadPerAxle = Settings.mass / Mathf.Max(1, _axles.Length);
 
             // Force enters the body at ground level, so the moment arm to the center of mass
             // produces the wheelie / roll-over behaviour instead of a pure translation.
@@ -1111,14 +1082,14 @@ namespace DriveMad
         void LimitSpeed()
         {
             float along = Vector3.Dot(_chassis.linearVelocity, chassisPhysics.forward);
-            if (Mathf.Abs(along) <= maxSpeed)
+            if (Mathf.Abs(along) <= Settings.maxSpeed)
             {
                 return;
             }
 
             Vector3 vel = _chassis.linearVelocity;
             vel -= chassisPhysics.forward * along;
-            vel += chassisPhysics.forward * (Mathf.Sign(along) * maxSpeed);
+            vel += chassisPhysics.forward * (Mathf.Sign(along) * Settings.maxSpeed);
             _chassis.linearVelocity = vel;
         }
 
@@ -1161,7 +1132,7 @@ namespace DriveMad
                 return;
             }
 
-            axle.wheelBody.angularVelocity *= Mathf.Clamp01(1f - rollingResistance * Time.fixedDeltaTime);
+            axle.wheelBody.angularVelocity *= Mathf.Clamp01(1f - Settings.rollingResistance * Time.fixedDeltaTime);
         }
 
         /// <summary>
@@ -1192,7 +1163,7 @@ namespace DriveMad
 
             float radius = axle.radius;
             Vector3 origin = axle.wheelBody.position + Vector3.up * 0.05f;
-            return Physics.Raycast(origin, Vector3.down, out hit, radius + 0.08f, groundMask,
+            return Physics.Raycast(origin, Vector3.down, out hit, radius + 0.08f, Settings.groundMask,
                 QueryTriggerInteraction.Ignore);
         }
 

@@ -16,7 +16,7 @@ MonoBehaviour:
   centerOfMassHeight: 0.08
   linearDamping: 0.04
   angularDamping: 0.22
-  bottomMass: 8
+  springFootMass: 8
   wheelMass: 16
   autoConfigureJoints: 1
   suspensionTravel: 0.07

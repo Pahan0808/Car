@@ -17,7 +17,8 @@ namespace DriveMad
         public float angularDamping = 0.22f;
 
         [Header("Axles")]
-        public float bottomMass = 8f;
+        [Tooltip("Mass of the lower suspension link (Bottom / spring foot). Wheels are set separately in wheelMass.")]
+        public float springFootMass = 8f;
         public float wheelMass = 16f;
 
         [Header("Suspension")]
