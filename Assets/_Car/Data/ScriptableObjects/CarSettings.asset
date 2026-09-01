@@ -13,12 +13,11 @@ MonoBehaviour:
   m_Name: CarSettings
   m_EditorClassIdentifier: 
   mass: 200
-  centerOfMass: {x: 0, y: 0.08, z: -0.16}
+  centerOfMassHeight: 0.08
   linearDamping: 0.04
   angularDamping: 0.22
   bottomMass: 8
   wheelMass: 16
-  wheelRadius: 0.34
   autoConfigureJoints: 1
   suspensionTravel: 0.07
   bodyWheelClearance: 0.03
@@ -27,7 +26,6 @@ MonoBehaviour:
   suspensionDampingRatio: 2
   maxSuspensionForce: 6000
   suspensionPitchTransfer: 0.6
-  autoBalanceCenterOfMass: 1
   maxWheelSpin: 90
   longitudinalGrip: 8
   maxTractionAccel: 12

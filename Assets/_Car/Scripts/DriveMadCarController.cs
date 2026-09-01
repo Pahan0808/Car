@@ -52,12 +52,11 @@ namespace DriveMad
         // Tuning is read through the settings asset. The property names match the previous fields so
         // the physics code below is untouched by the move to ScriptableObjects.
         float mass => Settings.mass;
-        Vector3 centerOfMass => Settings.centerOfMass;
+        float centerOfMassHeight => Settings.centerOfMassHeight;
         float linearDamping => Settings.linearDamping;
         float angularDamping => Settings.angularDamping;
         float bottomMass => Settings.bottomMass;
         float wheelMass => Settings.wheelMass;
-        float wheelRadius => Settings.wheelRadius;
         bool autoConfigureJoints => Settings.autoConfigureJoints;
         float suspensionTravel => Settings.suspensionTravel;
         float bodyWheelClearance => Settings.bodyWheelClearance;
@@ -66,7 +65,6 @@ namespace DriveMad
         float suspensionDampingRatio => Settings.suspensionDampingRatio;
         float maxSuspensionForce => Settings.maxSuspensionForce;
         float suspensionPitchTransfer => Settings.suspensionPitchTransfer;
-        bool autoBalanceCenterOfMass => Settings.autoBalanceCenterOfMass;
         float maxWheelSpin => Settings.maxWheelSpin;
         float longitudinalGrip => Settings.longitudinalGrip;
         float maxTractionAccel => Settings.maxTractionAccel;
@@ -215,7 +213,7 @@ namespace DriveMad
             // The scene pose is the authored rest pose. Do not average axle heights or move the
             // chassis here: that would make front and rear springs start with different lengths.
             // Gravity is set by LevelSession.Awake, so the preload is computed here, not in Awake.
-            BalanceCenterOfMass();
+            CalculateCenterOfMass();
             ApplyStaticPreload();
             ResetRuntimeVelocities();
             Physics.SyncTransforms();
@@ -283,7 +281,6 @@ namespace DriveMad
             _chassis.constraints = RigidbodyConstraints.FreezePositionX
                                    | RigidbodyConstraints.FreezeRotationY
                                    | RigidbodyConstraints.FreezeRotationZ;
-            _chassis.centerOfMass = centerOfMass;
             _chassis.maxAngularVelocity = 16f;
 
             _chassisColliders = chassisPhysics.GetComponentsInChildren<Collider>(true);
@@ -493,14 +490,13 @@ namespace DriveMad
             sphere.enabled = true;
             sphere.isTrigger = false;
             axle.wheelCol = sphere;
-
             axle.radius = MeasureRadius(sphere);
+
             if (axle.radius < 0.05f)
             {
-                axle.radius = wheelRadius;
+                Debug.LogError($"DriveMad: SphereCollider radius is too small for {axle.name}.", this);
             }
 
-            sphere.radius = axle.radius;
             sphere.center = Vector3.zero;
             sphere.sharedMaterial = GetWheelMaterial();
         }
@@ -562,18 +558,63 @@ namespace DriveMad
         }
 
         /// <summary>
-        /// Puts the center of mass exactly between the axle mounts, so the static load splits evenly
-        /// and neither end sags more than the other.
+        /// Calculates the center of mass from the chassis geometry and axle positions.
+        /// The longitudinal position is centered between the axle mounts so static load is balanced.
         /// </summary>
-        void BalanceCenterOfMass()
+        /// <summary>
+        /// Calculates the center of mass. X and Z are derived from chassis geometry and axle
+        /// positions (Z centered between axle mounts so static load is balanced); Y (height) is an
+        /// authored setting, since it directly controls wheelie / rollover sensitivity and should not
+        /// silently follow the collider's bounding box.
+        /// </summary>
+        void CalculateCenterOfMass()
         {
-            if (!autoBalanceCenterOfMass || _chassis == null || _axles == null || _axles.Length < 2)
+            if (_chassis == null)
             {
                 return;
             }
 
-            float midZ = (_axles[0].topLocalOnChassis.z + _axles[1].topLocalOnChassis.z) * 0.5f;
-            _chassis.centerOfMass = new Vector3(centerOfMass.x, centerOfMass.y, midZ);
+            Vector3 calculated = GetChassisGeometryCenter();
+            calculated.y = centerOfMassHeight;
+            if (_axles != null && _axles.Length >= 2)
+            {
+                calculated.z = (_axles[0].topLocalOnChassis.z + _axles[1].topLocalOnChassis.z) * 0.5f;
+            }
+
+            _chassis.centerOfMass = calculated;
+        }
+
+        Vector3 GetChassisGeometryCenter()
+        {
+            BoxCollider box = chassisPhysics != null ? chassisPhysics.GetComponent<BoxCollider>() : null;
+            if (box != null)
+            {
+                return box.center;
+            }
+
+            if (_chassisColliders == null || _chassisColliders.Length == 0)
+            {
+                return Vector3.zero;
+            }
+
+            Vector3 weightedCenter = Vector3.zero;
+            float totalWeight = 0f;
+            for (int i = 0; i < _chassisColliders.Length; i++)
+            {
+                Collider collider = _chassisColliders[i];
+                if (collider == null || collider.isTrigger)
+                {
+                    continue;
+                }
+
+                Vector3 localCenter = chassisPhysics.InverseTransformPoint(collider.bounds.center);
+                Vector3 size = collider.bounds.size;
+                float weight = Mathf.Max(0.0001f, size.x * size.y * size.z);
+                weightedCenter += localCenter * weight;
+                totalWeight += weight;
+            }
+
+            return totalWeight > 0f ? weightedCenter / totalWeight : Vector3.zero;
         }
 
         /// <summary>
@@ -738,16 +779,21 @@ namespace DriveMad
             return drive;
         }
 
+
+
+        static float GetMaxScale(Vector3 scale)
+        {
+            return Mathf.Max(0.0001f, Mathf.Max(Mathf.Abs(scale.x), Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z))));
+        }
+
         static float MeasureRadius(SphereCollider sphere)
         {
             if (sphere == null)
             {
-                return 0.34f;
+                return 0f;
             }
 
-            Vector3 scale = sphere.transform.lossyScale;
-            float maxScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
-            return sphere.radius * maxScale;
+            return sphere.radius * GetMaxScale(sphere.transform.lossyScale);
         }
 
         void AlignVehicleToGround()
@@ -1049,7 +1095,7 @@ namespace DriveMad
 
             forward.Normalize();
 
-            float radius = axle.radius > 0.05f ? axle.radius : wheelRadius;
+            float radius = axle.radius;
             float wheelSurfaceSpeed = omega * radius;
             float bodySpeed = Vector3.Dot(_chassis.linearVelocity, forward);
             float slip = wheelSurfaceSpeed - bodySpeed;
@@ -1144,7 +1190,7 @@ namespace DriveMad
                 return false;
             }
 
-            float radius = axle.radius > 0.05f ? axle.radius : wheelRadius;
+            float radius = axle.radius;
             Vector3 origin = axle.wheelBody.position + Vector3.up * 0.05f;
             return Physics.Raycast(origin, Vector3.down, out hit, radius + 0.08f, groundMask,
                 QueryTriggerInteraction.Ignore);

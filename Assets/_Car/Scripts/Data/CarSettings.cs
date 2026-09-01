@@ -11,14 +11,14 @@ namespace DriveMad
     {
         [Header("Body")]
         public float mass = 200f;
-        public Vector3 centerOfMass = new Vector3(0f, 0.08f, -0.16f);
+        [Tooltip("Height (local Y) of the center of mass above the chassis pivot. X and Z are always calculated from geometry / axle positions.")]
+        public float centerOfMassHeight = 0.08f;
         public float linearDamping = 0.04f;
         public float angularDamping = 0.22f;
 
         [Header("Axles")]
         public float bottomMass = 8f;
         public float wheelMass = 16f;
-        public float wheelRadius = 0.34f;
 
         [Header("Suspension")]
         [Tooltip("Off = keep the ConfigurableJoint settings authored in the scene; only connectedBody is wired.")]
@@ -36,8 +36,6 @@ namespace DriveMad
         [Tooltip("Share of the spring reaction applied at the axle mount; the rest goes to the center of mass. Lower = less body rocking.")]
         [Range(0f, 1f)]
         public float suspensionPitchTransfer = 0.6f;
-        [Tooltip("Move the center of mass to the midpoint between the axle mounts so both springs carry the same load.")]
-        public bool autoBalanceCenterOfMass = true;
 
         [Header("Motor / grip")]
         public float maxWheelSpin = 90f;
