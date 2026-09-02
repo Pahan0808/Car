@@ -12,13 +12,9 @@ namespace DriveMad
         public class AxleSetup
         {
             public string name;
-            public Transform suspensionParent;
             public Transform top;
             public Transform bottom;
             public Transform wheelCollider;
-            public Transform leftVisual;
-            public Transform rightVisual;
-            public Transform suspensionVisual;
             [Tooltip("Suspension joint on Bottom (Bottom -> ColliiderBody).")]
             public ConfigurableJoint suspensionJoint;
             [Tooltip("Wheel joint on ColliderWheels (ColliderWheels -> Bottom).")]
@@ -35,7 +31,6 @@ namespace DriveMad
             [System.NonSerialized] public float authoredSpringLength;
             [System.NonSerialized] public float restSpringLength;
             [System.NonSerialized] public float maxSpringLength;
-            [System.NonSerialized] public float groundY;
         }
 
         [Header("Data")]
@@ -89,17 +84,6 @@ namespace DriveMad
 
         public void SetThrottle(float value) => _throttle = Mathf.Clamp(value, -1f, 1f);
         public void SetChassis(Transform value) => chassisPhysics = value;
-
-        public void SetVisuals(Transform leftFront, Transform rightFront, Transform leftRear, Transform rightRear,
-            Transform frontSuspension, Transform rearSuspension)
-        {
-            front.leftVisual = leftFront;
-            front.rightVisual = rightFront;
-            front.suspensionVisual = frontSuspension;
-            rear.leftVisual = leftRear;
-            rear.rightVisual = rightRear;
-            rear.suspensionVisual = rearSuspension;
-        }
 
         public void FreezePhysics(bool freeze)
         {
@@ -298,49 +282,21 @@ namespace DriveMad
 
         AxleSetup BindAxle(AxleSetup axle)
         {
-            if (axle.bottom == null || axle.wheelCollider == null || _chassis == null)
+            if (axle.top == null || axle.bottom == null || axle.wheelCollider == null || _chassis == null)
             {
                 Debug.LogWarning($"DriveMad: incomplete axle {axle.name}.", this);
                 return axle;
             }
-
-            if (axle.top == null && axle.suspensionParent != null)
-            {
-                axle.top = axle.suspensionParent.Find("Top");
-            }
-
-            if (axle.suspensionParent != null && axle.suspensionParent.parent == chassisPhysics)
-            {
-                axle.suspensionParent.SetParent(transform, true);
-            }
-
-            if (axle.suspensionVisual == null && axle.bottom != null)
-            {
-                axle.suspensionVisual = axle.bottom.Find("Visual");
-            }
-
-            ResolveWheelVisuals(axle);
 
             if (axle.wheelCollider.parent == axle.bottom)
             {
                 axle.wheelCollider.SetParent(transform, true);
             }
 
-            if (axle.top != null)
-            {
-                axle.topLocalOnChassis = chassisPhysics.InverseTransformPoint(axle.top.position);
-                axle.top.SetParent(chassisPhysics, true);
-                axle.top.localPosition = axle.topLocalOnChassis;
-                axle.top.localRotation = Quaternion.identity;
-            }
-            else if (axle.suspensionParent != null)
-            {
-                axle.topLocalOnChassis = chassisPhysics.InverseTransformPoint(axle.suspensionParent.position);
-            }
-            else
-            {
-                axle.topLocalOnChassis = axle.bottom.localPosition;
-            }
+            axle.topLocalOnChassis = chassisPhysics.InverseTransformPoint(axle.top.position);
+            axle.top.SetParent(chassisPhysics, true);
+            axle.top.localPosition = axle.topLocalOnChassis;
+            axle.top.localRotation = Quaternion.identity;
 
             axle.wheelLocalOnBottom = axle.bottom.InverseTransformPoint(axle.wheelCollider.position);
             axle.wheelLocalRotOnBottom = Quaternion.Inverse(axle.bottom.rotation) * axle.wheelCollider.rotation;
@@ -351,28 +307,6 @@ namespace DriveMad
             SetupJoints(axle);
 
             return axle;
-        }
-
-        static void ResolveWheelVisuals(AxleSetup axle)
-        {
-            if (axle.leftVisual != null && axle.rightVisual != null)
-            {
-                return;
-            }
-
-            Transform wRoot = axle.wheelCollider;
-            for (int i = 0; i < wRoot.childCount; i++)
-            {
-                Transform c = wRoot.GetChild(i);
-                if (c.name.Contains("FL") || c.name.Contains("RL") || c.name.Contains("L"))
-                {
-                    axle.leftVisual = c;
-                }
-                else if (c.name.Contains("FR") || c.name.Contains("RR") || c.name.Contains("R"))
-                {
-                    axle.rightVisual = c;
-                }
-            }
         }
 
         void SetupBottomBody(AxleSetup axle)
@@ -420,26 +354,6 @@ namespace DriveMad
             EnsureWheelCollider(axle);
             SetLayerRecursive(axle.wheelCollider, WheelPhysicsLayer);
             IgnoreChassisCollision(axle.wheelCol);
-        }
-
-        RigidbodyConstraints GetWheelRotationConstraints()
-        {
-            Vector3 spin = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
-            float ax = Mathf.Abs(spin.x);
-            float ay = Mathf.Abs(spin.y);
-            float az = Mathf.Abs(spin.z);
-
-            if (ay >= ax && ay >= az)
-            {
-                return RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-            }
-
-            if (ax >= az)
-            {
-                return RigidbodyConstraints.FreezeRotationY | RigidbodyConstraints.FreezeRotationZ;
-            }
-
-            return RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationY;
         }
 
         void EnsureWheelCollider(AxleSetup axle)
@@ -720,7 +634,7 @@ namespace DriveMad
             j.autoConfigureConnectedAnchor = false;
             j.anchor = Vector3.zero;
             j.connectedAnchor = axle.wheelLocalOnBottom;
-            j.axis = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
+            j.axis = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.right;
             j.secondaryAxis = Vector3.forward;
             j.xMotion = ConfigurableJointMotion.Locked;
             j.yMotion = ConfigurableJointMotion.Locked;
@@ -765,116 +679,6 @@ namespace DriveMad
             }
 
             return sphere.radius * GetMaxScale(sphere.transform.lossyScale);
-        }
-
-        void AlignVehicleToGround()
-        {
-            if (_axles == null || _chassis == null)
-            {
-                return;
-            }
-
-            float sumGroundY = 0f;
-            int hits = 0;
-            for (int i = 0; i < _axles.Length; i++)
-            {
-                if (SampleGround(_axles[i]))
-                {
-                    sumGroundY += _axles[i].groundY;
-                    hits++;
-                }
-            }
-
-            if (hits == 0)
-            {
-                return;
-            }
-
-            float avgGroundY = sumGroundY / hits;
-            float sumChassisY = 0f;
-            for (int i = 0; i < _axles.Length; i++)
-            {
-                AxleSetup axle = _axles[i];
-                float wheelCenterY = axle.groundY + axle.radius;
-                float bottomY = wheelCenterY - axle.wheelLocalOnBottom.y;
-                float mountY = bottomY + axle.restSpringLength;
-                float chassisY = mountY - axle.topLocalOnChassis.y;
-                sumChassisY += chassisY;
-            }
-
-            Vector3 pos = _chassis.position;
-            pos.y = sumChassisY / _axles.Length;
-            _chassis.position = pos;
-            _chassis.rotation = Quaternion.identity;
-            _chassis.linearVelocity = Vector3.zero;
-            _chassis.angularVelocity = Vector3.zero;
-
-            for (int i = 0; i < _axles.Length; i++)
-            {
-                PlaceAxleOnGround(_axles[i]);
-            }
-        }
-
-        bool SampleGround(AxleSetup axle)
-        {
-            Vector3 mountWorld = chassisPhysics.TransformPoint(axle.topLocalOnChassis);
-            Vector3 origin = mountWorld + Vector3.up * 4f;
-            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 12f, Settings.groundMask, QueryTriggerInteraction.Ignore))
-            {
-                axle.groundY = hit.point.y;
-                return true;
-            }
-
-            axle.groundY = 0f;
-            return false;
-        }
-
-        void PlaceAxleOnGround(AxleSetup axle)
-        {
-            Vector3 mount = chassisPhysics.TransformPoint(axle.topLocalOnChassis);
-            Vector3 down = Vector3.down;
-
-            float wheelCenterY = axle.groundY + axle.radius;
-            Vector3 wheelPos = axle.wheelCollider.position;
-            wheelPos.y = wheelCenterY;
-            axle.bottom.rotation = chassisPhysics.rotation;
-            axle.bottom.position = wheelPos - axle.bottom.rotation * axle.wheelLocalOnBottom;
-
-            Vector3 bottomPos = axle.bottom.position;
-            axle.wheelCollider.position = wheelPos;
-            axle.wheelCollider.rotation = axle.bottom.rotation * axle.wheelLocalRotOnBottom;
-
-            if (axle.wheelBody != null)
-            {
-                axle.wheelBody.position = wheelPos;
-                axle.wheelBody.rotation = axle.wheelCollider.rotation;
-                axle.wheelBody.linearVelocity = Vector3.zero;
-                axle.wheelBody.angularVelocity = Vector3.zero;
-            }
-
-            if (axle.bottomBody != null)
-            {
-                axle.bottomBody.position = bottomPos;
-                axle.bottomBody.rotation = axle.bottom.rotation;
-                axle.bottomBody.linearVelocity = Vector3.zero;
-                axle.bottomBody.angularVelocity = Vector3.zero;
-            }
-
-            float currentLength = Vector3.Dot(axle.bottom.position - mount, down);
-            currentLength = Mathf.Clamp(currentLength, axle.minSpringLength, axle.maxSpringLength);
-            Vector3 correctedBottom = mount + down * currentLength;
-            axle.bottom.position = correctedBottom;
-            if (axle.bottomBody != null)
-            {
-                axle.bottomBody.position = correctedBottom;
-            }
-
-            wheelPos = correctedBottom + axle.bottom.rotation * axle.wheelLocalOnBottom;
-            axle.wheelCollider.position = wheelPos;
-            if (axle.wheelBody != null)
-            {
-                axle.wheelBody.position = wheelPos;
-            }
         }
 
         void FixedUpdate()
@@ -1039,7 +843,7 @@ namespace DriveMad
 
         Vector3 GetSpinAxisWorld(Transform wheelRoot)
         {
-            Vector3 local = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.up;
+            Vector3 local = Settings.wheelSpinAxis.sqrMagnitude > 0.0001f ? Settings.wheelSpinAxis.normalized : Vector3.right;
             return wheelRoot.TransformDirection(local);
         }
 
@@ -1150,8 +954,6 @@ namespace DriveMad
             v.x = 0f;
             rb.linearVelocity = v;
         }
-
-        bool IsAxleGrounded(AxleSetup axle) => TryGetGroundHit(axle, out _);
 
         bool TryGetGroundHit(AxleSetup axle, out RaycastHit hit)
         {

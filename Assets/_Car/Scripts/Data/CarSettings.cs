@@ -50,7 +50,7 @@ namespace DriveMad
         public float airPitchTorque = 6f;
         public float airAngularDamping = 0.1f;
         [Tooltip("Local spin axis on the ColliderWheels Rigidbody; child meshes follow automatically.")]
-        public Vector3 wheelSpinAxis = Vector3.up;
+        public Vector3 wheelSpinAxis = Vector3.right;
         [Tooltip("PhysX friction on the wheel colliders. Traction itself is solved by the slip model.")]
         [Range(0f, 1f)]
         public float wheelFriction = 0.35f;
